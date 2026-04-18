@@ -1,0 +1,102 @@
+version: "3.9"
+
+# ─────────────────────────────────────────
+# AI Disaster Tweet Analyzer
+# Crisis Intelligence System
+# ─────────────────────────────────────────
+
+services:
+
+  # ─── Backend API ─────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: crisis-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data        # Persist scraped/enriched tweet data
+      - ./models:/app/models    # Persist trained model
+      - hf_cache:/app/.cache    # Cache Hugging Face model downloads
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - TRANSFORMERS_CACHE=/app/.cache/huggingface
+    restart: unless-stopped
+    networks:
+      - crisis-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ─── Frontend Dashboard ───────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    container_name: crisis-dashboard
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data        # Shared data volume with backend
+      - ./models:/app/models    # Shared model volume
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - crisis-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ─── MLflow Tracking Server ───────────────
+  mlflow:
+    image: python:3.10-slim
+    container_name: crisis-mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_data:/mlflow
+    command: >
+      bash -c "pip install mlflow>=2.7.0 --quiet &&
+               mlflow server
+               --host 0.0.0.0
+               --port 5000
+               --backend-store-uri /mlflow/mlruns
+               --default-artifact-root /mlflow/artifacts"
+    environment:
+      - MLFLOW_TRACKING_URI=http://localhost:5000
+    restart: unless-stopped
+    networks:
+      - crisis-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+
+# ─── Volumes ─────────────────────────────
+volumes:
+  hf_cache:
+    driver: local
+  mlflow_data:
+    driver: local
+
+# ─── Networks ────────────────────────────
+networks:
+  crisis-net:
+    driver: bridge
+    name: crisis-intelligence-network

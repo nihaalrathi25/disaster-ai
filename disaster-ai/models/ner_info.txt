@@ -1,0 +1,3 @@
+Uses spaCy model: en_core_web_sm
+Install using:
+python -m spacy download en_core_web_sm
